@@ -1,0 +1,70 @@
+Gerar um script python pra ler o arquivo excel ISS_IMPORTAÇÃO_03_06_2026.xlsx e a partir dele, para cada tabela que contenha o cabeçalho com as colunas::
+CONTRATO  	
+"CODIGO BACEN"
+FORNECEDOR
+INVOICE
+"DT EMISSÃO"
+"DESCRIÇÃO SERVIÇOS  CONF.  EMAIL ENVIADO"
+"MOEDA ESTRANGEIRA"
+TAXA
+MOEDA
+"MOEDA NACIONAL"
+"CODIGO SERVIÇOS LEI 116"
+"% ISS"
+ISS
+NFTS
+ENDEREÇO
+OBSERVAÇÕES
+STATUS
+
+as tabelas estão a partir da linha 10 e entre as colunas B e R
+
+ao encontrar um cabeçalho da tabela a mesma terminas quando a coluna B estiver vazia e ao terminar de ler uma tabela para verificar se tem outra tabela, deve verificar se encontra novamente o cabeçalho até 10 linhas abaixo do final da primeira tabela.
+
+Ao identificar todas as tabelas, para cada tabela deve-se gerar um arquivo .txt no layout especificado no Layout_EnvioLote_NFTS-v1.md conforme instruções a seguir:
+
+Registro tipo 1 – Cabeçalho
+Tipo de registro: 1 (fixo)
+Versão do arquivo: 001 (fixo)
+Inscrição Municipal do Sujeito Passivo: (deve ser lido do arquivo .env da variável INSCRICAO_MUNICIPAL_SUJEITO_PASSIVO)
+Data de Início do Período: 20260511  (deve ter a menor data da coluna "DT EMISSÃO" da tabela excel no formato AAAAMMDD)
+Data de Fim do Período: 20260511  (deve ter a maior data da coluna "DT EMISSÃO" da tabela excel no formato AAAAMMDD)
+
+Registro tipo 4 – Detalhe (para cada linha da tabela excel)
+Tipo de registro: 4 (fixo)
+Tipo do documento: 01 (fixo)
+Série do documento: "0   " (fixo)
+Número do documento: 000000000000 (coluna "INVOICE" da tabela excel, caso contenha letras, colocar zeros)
+Data da prestação dos serviços: 20260511 (coluna "DT EMISSÃO" da tabela excel no formato AAAAMMDD )
+Situação da NFTS: N (fixo)
+Tributação do serviço: T (fixo)
+Valor dos serviços: 000000016887024 (coluna "MOEDA NACIONAL" da tabela excel conforme exemplo R$ 168870,20 → 000000000050085;)
+Valor das deduções: 000000000000000 (fixo)
+Código do serviço tomado ou intermediado: 02800 (fixo)
+Código do subitem da lista: 0105 (coluna "CODIGO SERVIÇOS LEI 116" da tabela excel conforme exemplo 1.01 - 0101 )
+Alíquota: 0290 (coluna "% ISS" da tabela excel conforme exemplo 5,00% → 0500)
+ISS Retido: 1 (fixo)
+Indicador de CPF/CNPJ do prestador: 3 (fixo)
+CPF ou CNPJ do prestador: 00000000000000 (fixo)
+Inscrição Municipal do prestador: 00000000 (fixo)
+Nome/Razão Social do prestador: XPTO (coluna "FORNECEDOR" da tabela excel)
+Tipo do endereço do prestador: vazio (fixo)
+Endereço do prestador: Rua XPTO (coluna "ENDEREÇO" da tabela excel, caso não não caiba nos 50 caracteres truncar )
+Número do endereço do prestador: vazio (fixo)
+Complemento do endereço: (caso a coluna "ENDEREÇO" da tabela excel tenha mais que 50 caracteres, colocar o conteudo a partir dos caractere 51 e truncar se necessário)
+Bairro: vazio (fixo)
+Cidade: vazio (fixo)
+UF: vazio (fixo)
+CEP: vazio (fixo)
+E-mail: vazio (fixo)
+Tipo de NFTS: 1 (fixo)
+Regime de tributação: 0 (fixo)
+Data de pagamento da nota: vazio (fixo)
+Discriminação dos serviços: LICENÇA DE USO DE SOFTWARE (coluna "DESCRIÇÃO SERVIÇOS  CONF.  EMAIL ENVIADO" da tabela excel, e caso a coluna "INVOICE" da tabela excel contenha letras, adicionar "INVOICE: <INVOICE> ao final."  )
+
+Registro tipo 9 – Rodapé
+Tipo de registro: 9 (fixo)
+Número de linhas de detalhe do arquivo: 0000001 (quantidade de linhas do tipo 4)
+Valor total dos serviços contido no arquivo: 000000016887024 (Soma dos valores da coluna "Valor dos serviços" dos registros do tipo 4 )
+Valor total das deduções contidas no arquivo: 000000000000000 (fixo)
+ 
