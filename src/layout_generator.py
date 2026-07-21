@@ -1,10 +1,57 @@
 from typing import Dict, Any, List
 import re
-from dotenv import load_dotenv
 import os
+import warnings
+from datetime import datetime
+from dotenv import load_dotenv
 
 # Carregar variáveis de ambiente
 load_dotenv()
+
+
+# Constantes do layout NFTS
+VERSION_LENGTH = 3
+INSCRICAO_LENGTH = 8
+DATE_LENGTH = 8
+DOCUMENT_TYPE_LENGTH = 2
+DOCUMENT_SERIE_LENGTH = 5
+DOCUMENT_NUMBER_LENGTH = 12
+SERVICE_VALUE_LENGTH = 15
+DEDUCTION_VALUE_LENGTH = 15
+SERVICE_CODE_TAKEN_LENGTH = 5
+SUBITEM_CODE_LENGTH = 4
+ALIQUOTA_LENGTH = 4
+CPF_CNPJ_LENGTH = 14
+IM_LENGTH = 8
+PRESTADOR_NAME_LENGTH = 75
+ADDRESS_TYPE_LENGTH = 3
+ADDRESS_LENGTH = 50
+ADDRESS_NUMBER_LENGTH = 10
+COMPLEMENT_LENGTH = 30
+NEIGHBORHOOD_LENGTH = 30
+CITY_LENGTH = 50
+UF_LENGTH = 2
+CEP_LENGTH = 8
+EMAIL_LENGTH = 75
+DISCRIMINACAO_LENGTH = 500
+
+# Posições dos campos no registro de detalhe (0-indexed)
+DETAIL_VALUE_START = 30
+DETAIL_VALUE_END = 45
+DETAIL_DEDUCTION_START = 45
+DETAIL_DEDUCTION_END = 60
+DETAIL_SERVICE_CODE_START = 60
+DETAIL_SERVICE_CODE_END = 65
+DETAIL_SUBITEM_START = 65
+DETAIL_SUBITEM_END = 69
+DETAIL_ALIQUOTA_START = 69
+DETAIL_ALIQUOTA_END = 73
+
+# Constantes de comportamento
+MIN_FUZZY_THRESHOLD = 0.6
+HEADER_FUZZY_THRESHOLD = 0.7
+DEFAULT_DATE = "20260511"
+DEFAULT_VERSION = "001"
 
 
 class LayoutGenerator:
@@ -26,7 +73,7 @@ class LayoutGenerator:
             )
         
         self.inscricao_municipal = inscricao
-        self.versao_arquivo = "001"
+        self.versao_arquivo = DEFAULT_VERSION
     
     def format_numeric_value(self, value: Any, length: int) -> str:
         """
@@ -50,7 +97,7 @@ class LayoutGenerator:
             
             # Formatar com zeros à esquerda
             return str(int_value).zfill(length)
-        except:
+        except (ValueError, TypeError):
             return "0" * length
     
     def normalize_text(self, value: Any) -> str:
@@ -104,9 +151,9 @@ class LayoutGenerator:
             
             # Multiplicar por 100 para remover casas decimais
             int_value = int(round(numeric_value * 100))
-            return str(int_value).zfill(4)
-        except:
-            return "0000"
+            return str(int_value).zfill(ALIQUOTA_LENGTH)
+        except (ValueError, TypeError):
+            return "0" * ALIQUOTA_LENGTH
     
     def format_service_code(self, code: Any) -> str:
         """
@@ -120,9 +167,9 @@ class LayoutGenerator:
             # Remover pontos
             code_str = str(code).replace('.', '').strip()
             # Preencher com zeros à esquerda
-            return code_str.zfill(4)
-        except:
-            return "0000"
+            return code_str.zfill(SUBITEM_CODE_LENGTH)
+        except (ValueError, TypeError):
+            return "0" * SUBITEM_CODE_LENGTH
     
     def format_service_code_tomado(self, code: Any) -> str:
         """
@@ -131,20 +178,19 @@ class LayoutGenerator:
         Exemplo: 2800 → 02800, 123456 → 12345 (truncado)
         """
         if code is None:
-            return "00000"
+            return "0" * SERVICE_CODE_TAKEN_LENGTH
         
         # Converter para string e remover caracteres não numéricos
         code_str = str(code)
         code_str = re.sub(r'[^\d]', '', code_str)
         
         # Se for maior que 5, truncar e logar warning
-        if len(code_str) > 5:
-            import warnings
-            warnings.warn(f"Código do Serviço truncado de {code_str} para {code_str[:5]} (máximo 5 caracteres)")
-            code_str = code_str[:5]
+        if len(code_str) > SERVICE_CODE_TAKEN_LENGTH:
+            warnings.warn(f"Código do Serviço truncado de {code_str} para {code_str[:SERVICE_CODE_TAKEN_LENGTH]} (máximo {SERVICE_CODE_TAKEN_LENGTH} caracteres)")
+            code_str = code_str[:SERVICE_CODE_TAKEN_LENGTH]
         
         # Preencher com zeros à esquerda para ter exatamente 5 caracteres
-        return code_str.zfill(5)
+        return code_str.zfill(SERVICE_CODE_TAKEN_LENGTH)
     
     def has_letters(self, value: Any) -> bool:
         """Verifica se uma string contém letras."""
@@ -152,27 +198,53 @@ class LayoutGenerator:
             return False
         return any(c.isalpha() for c in str(value))
     
+    def _format_date(self, value: Any) -> str:
+        """
+        Converte data serial do Excel ou datetime para formato AAAAMMDD.
+        """
+        if value is None:
+            return DEFAULT_DATE
+        
+        try:
+            if isinstance(value, datetime):
+                return value.strftime("%Y%m%d")
+            elif isinstance(value, (int, float)):
+                dt = datetime.fromordinal(datetime(1900, 1, 1).toordinal() + int(value) - 2)
+                return dt.strftime("%Y%m%d")
+            else:
+                # Se for string, remover hora e formatar
+                data_str = str(value)
+                if ' ' in data_str:
+                    data_str = data_str.split(' ')[0]
+                data_prestacao = data_str.replace('-', '').replace('/', '')
+                # Se tiver 6 dígitos (ex: 260511), adicionar ano 20
+                if len(data_prestacao) == 6 and data_prestacao.isdigit():
+                    data_prestacao = "20" + data_prestacao
+                # Se tiver 7 dígitos (ex: 2605110), adicionar ano 2
+                elif len(data_prestacao) == 7 and data_prestacao.isdigit():
+                    data_prestacao = "2" + data_prestacao
+                return data_prestacao if len(data_prestacao) == 8 else DEFAULT_DATE
+        except (ValueError, TypeError, OverflowError):
+            return DEFAULT_DATE
+    
     def generate_header_record(self, table_data: List[Dict[str, Any]]) -> str:
         """
         Gera registro tipo 1 (Cabeçalho).
         """
-        from datetime import datetime
-        
         # Encontrar menor e maior data de emissão
         dates_formatted = []
         for row in table_data:
             dt_emissao = row.get("DT EMISSAO")
-            if dt_emissao:
-                if isinstance(dt_emissao, datetime):
-                    date_str = dt_emissao.strftime("%Y%m%d")
-                    dates_formatted.append(date_str)
+            date_str = self._format_date(dt_emissao)
+            if date_str != DEFAULT_DATE:
+                dates_formatted.append(date_str)
         
         if dates_formatted:
             data_inicio = min(dates_formatted)
             data_fim = max(dates_formatted)
         else:
-            data_inicio = "20260511"
-            data_fim = "20260511"
+            data_inicio = DEFAULT_DATE
+            data_fim = DEFAULT_DATE
         
         # Montar registro
         record = (
@@ -204,50 +276,24 @@ class LayoutGenerator:
         
         # Número do documento (zeros se tiver letras)
         if self.has_letters(invoice):
-            numero_documento = "0" * 12
+            numero_documento = "0" * DOCUMENT_NUMBER_LENGTH
         else:
             # Remover caracteres não numéricos
             invoice_clean = re.sub(r'[^\d]', '', str(invoice))
             # Se for maior que 12, truncar
-            if len(invoice_clean) > 12:
-                invoice_clean = invoice_clean[:12]
+            if len(invoice_clean) > DOCUMENT_NUMBER_LENGTH:
+                invoice_clean = invoice_clean[:DOCUMENT_NUMBER_LENGTH]
             # Preencher com zeros à esquerda para ter exatamente 12 caracteres
-            numero_documento = invoice_clean.zfill(12)
+            numero_documento = invoice_clean.zfill(DOCUMENT_NUMBER_LENGTH)
         
-        # Data da prestação - usar conversão do ExcelReader se for serial
-        if dt_emissao:
-            from datetime import datetime
-            if isinstance(dt_emissao, datetime):
-                data_prestacao = dt_emissao.strftime("%Y%m%d")
-            else:
-                # Tentar converter como número serial do Excel
-                try:
-                    # Se for número, converter usando lógica do Excel
-                    if isinstance(dt_emissao, (int, float)):
-                        dt = datetime.fromordinal(datetime(1900, 1, 1).toordinal() + int(dt_emissao) - 2)
-                        data_prestacao = dt.strftime("%Y%m%d")
-                    else:
-                        # Se for string, remover hora e formatar
-                        data_str = str(dt_emissao)
-                        if ' ' in data_str:
-                            data_str = data_str.split(' ')[0]
-                        data_prestacao = data_str.replace('-', '').replace('/', '')
-                        # Se tiver 7 dígitos (ex: 260511), adicionar ano 202
-                        if len(data_prestacao) == 7 and data_prestao.isdigit():
-                            data_prestacao = "202" + data_prestacao
-                        # Se tiver 8 dígitos mas começar com 0 (ex: 0260430), adicionar 20
-                        elif len(data_prestacao) == 7 and data_prestao.startswith('0'):
-                            data_prestacao = "20" + data_prestacao[1:]
-                except:
-                    data_prestacao = "20260511"
-        else:
-            data_prestacao = "20260511"
+        # Data da prestação
+        data_prestacao = self._format_date(dt_emissao)
         
         # Valor dos serviços
-        valor_servicos = self.format_numeric_value(moeda_nacional, 15)
+        valor_servicos = self.format_numeric_value(moeda_nacional, SERVICE_VALUE_LENGTH)
         
         # Valor das deduções (fixo zeros)
-        valor_deducoes = "0" * 15
+        valor_deducoes = "0" * DEDUCTION_VALUE_LENGTH
         
         # Código do serviço tomado (da coluna CÓDIGO DO SERVIÇO do Excel)
         codigo_servico_tomado = self.format_service_code_tomado(codigo_servico_excel)
@@ -259,19 +305,19 @@ class LayoutGenerator:
         aliquota = self.format_percentage(percent_iss)
         
         # Nome/Razão Social do prestador
-        nome_prestador = self.format_text_value(fornecedor, 75)
+        nome_prestador = self.format_text_value(fornecedor, PRESTADOR_NAME_LENGTH)
         
         # Endereço (50 chars) + Complemento (30 chars)
         endereco_str = self.normalize_text(endereco) if endereco else ""
-        if len(endereco_str) > 50:
-            endereco_principal = endereco_str[:50]
-            complemento = endereco_str[50:80]
+        if len(endereco_str) > ADDRESS_LENGTH:
+            endereco_principal = endereco_str[:ADDRESS_LENGTH]
+            complemento = endereco_str[ADDRESS_LENGTH:ADDRESS_LENGTH + COMPLEMENT_LENGTH]
         else:
             endereco_principal = endereco_str
             complemento = ""
         
-        endereco_prestador = self.format_text_value(endereco_principal, 50)
-        complemento_endereco = self.format_text_value(complemento, 30)
+        endereco_prestador = self.format_text_value(endereco_principal, ADDRESS_LENGTH)
+        complemento_endereco = self.format_text_value(complemento, COMPLEMENT_LENGTH)
         
         # Discriminação dos serviços
         discriminacao = self.normalize_text(descricao_servicos) if descricao_servicos else ""
@@ -293,7 +339,7 @@ class LayoutGenerator:
         record = (
             "4" +  # Tipo de registro (1)
             "01" +  # Tipo do documento (2)
-            "0    " +  # Série do documento (5)
+            " ".ljust(DOCUMENT_SERIE_LENGTH) +  # Série do documento (5)
             numero_documento +  # Número do documento (12)
             data_prestacao +  # Data da prestação (8)
             "N" +  # Situação da NFTS (1)
@@ -305,21 +351,21 @@ class LayoutGenerator:
             aliquota +  # Alíquota (4)
             "1" +  # ISS Retido (1)
             "3" +  # Indicador de CPF/CNPJ do prestador (1)
-            "0" * 14 +  # CPF ou CNPJ do prestador (14)
-            "0" * 8 +  # Inscrição Municipal do prestador (8)
+            "0" * CPF_CNPJ_LENGTH +  # CPF ou CNPJ do prestador (14)
+            "0" * IM_LENGTH +  # Inscrição Municipal do prestador (8)
             nome_prestador +  # Nome/Razão Social (75)
-            " " * 3 +  # Tipo do endereço (3) - vazio conforme especificação
+            " ".ljust(ADDRESS_TYPE_LENGTH) +  # Tipo do endereço (3) - vazio conforme especificação
             endereco_prestador +  # Endereço (50)
-            " " * 10 +  # Número do endereço (10)
+            " ".ljust(ADDRESS_NUMBER_LENGTH) +  # Número do endereço (10)
             complemento_endereco +  # Complemento (30)
-            " " * 30 +  # Bairro (30)
-            " " * 50 +  # Cidade (50)
-            " " * 2 +  # UF (2)
-            " " * 8 +  # CEP (8)
-            " " * 75 +  # E-mail (75)
+            " ".ljust(NEIGHBORHOOD_LENGTH) +  # Bairro (30)
+            " ".ljust(CITY_LENGTH) +  # Cidade (50)
+            " ".ljust(UF_LENGTH) +  # UF (2)
+            " ".ljust(CEP_LENGTH) +  # CEP (8)
+            " ".ljust(EMAIL_LENGTH) +  # E-mail (75)
             "1" +  # Tipo de NFTS (1)
             "0" +  # Regime de tributação (1)
-            " " * 8 +  # Data de pagamento (8)
+            " ".ljust(DATE_LENGTH) +  # Data de pagamento (8)
             discriminacao  # Discriminação dos serviços (variável)
         )
         
@@ -337,7 +383,7 @@ class LayoutGenerator:
         valor_total = total_value
         
         # Valor total das deduções (fixo zeros)
-        valor_deducoes_total = "0" * 15
+        valor_deducoes_total = "0" * DEDUCTION_VALUE_LENGTH
         
         # Montar registro
         record = (
@@ -366,12 +412,12 @@ class LayoutGenerator:
                 for row in table_data:
                     detail = self.generate_detail_record(row)
                     f.write(detail)
-                    # Extrair valor dos serviços do detalhe gerado (posições 30-44, 0-indexed)
-                    valor_servicos = detail[30:45]
+                    # Extrair valor dos serviços do detalhe gerado
+                    valor_servicos = detail[DETAIL_VALUE_START:DETAIL_VALUE_END]
                     total_value += int(valor_servicos) if valor_servicos.isdigit() else 0
                 
                 # Gerar rodapé
-                footer = self.generate_footer_record(len(table_data), str(total_value).zfill(15))
+                footer = self.generate_footer_record(len(table_data), str(total_value).zfill(SERVICE_VALUE_LENGTH))
                 f.write(footer)
             
             return True, f"Arquivo gerado com sucesso: {output_path}", str(total_value).zfill(15)

@@ -1,5 +1,17 @@
 from typing import List, Tuple, Dict, Any
 import re
+import sys
+import os
+
+# Adicionar diretório src ao path para importar constantes
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from layout_generator import (
+    DATE_LENGTH, INSCRICAO_LENGTH, VERSION_LENGTH, SERVICE_VALUE_LENGTH,
+    DEDUCTION_VALUE_LENGTH, DETAIL_VALUE_START, DETAIL_VALUE_END,
+    DETAIL_DEDUCTION_START, DETAIL_DEDUCTION_END, DETAIL_SERVICE_CODE_START,
+    DETAIL_SERVICE_CODE_END, DETAIL_SUBITEM_START, DETAIL_SUBITEM_END,
+    DETAIL_ALIQUOTA_START, DETAIL_ALIQUOTA_END
+)
 
 
 class Validator:
@@ -18,7 +30,7 @@ class Validator:
         self.warnings = []
         
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, 'r', encoding='iso-8859-1') as f:
                 lines = f.readlines()
             
             if not lines:
@@ -37,7 +49,7 @@ class Validator:
                     if not self.validate_detail_record(line):
                         self.errors.append(f"Erro na validação do registro detalhe linha {i+1}")
                     # Extrair valor dos serviços para validação do rodapé
-                    valor_servicos = line[30:45]
+                    valor_servicos = line[DETAIL_VALUE_START:DETAIL_VALUE_END]
                     if valor_servicos.isdigit():
                         total_value += int(valor_servicos)
                     detail_count += 1
@@ -61,9 +73,12 @@ class Validator:
         # Remover CRLF para validação
         record_clean = record.rstrip('\r\n')
         
+        # Tamanho esperado: 1 + 3 + 8 + 8 + 8 = 28
+        expected_size = 1 + VERSION_LENGTH + INSCRICAO_LENGTH + DATE_LENGTH + DATE_LENGTH
+        
         # Validar tamanho
-        if len(record_clean) != 28:
-            self.errors.append(f"Cabeçalho: tamanho incorreto ({len(record_clean)} caracteres, esperado 28)")
+        if len(record_clean) != expected_size:
+            self.errors.append(f"Cabeçalho: tamanho incorreto ({len(record_clean)} caracteres, esperado {expected_size})")
             return False
         
         # Validar tipo de registro
@@ -72,20 +87,24 @@ class Validator:
             return False
         
         # Validar versão (deve ser numérica)
-        versao = record_clean[1:4]
+        versao_end = 1 + VERSION_LENGTH
+        versao = record_clean[1:versao_end]
         if not versao.isdigit():
             self.errors.append("Cabeçalho: versão deve ser numérica")
             return False
         
         # Validar inscrição municipal (deve ser numérica)
-        inscricao = record_clean[4:12]
+        insc_start = versao_end
+        insc_end = insc_start + INSCRICAO_LENGTH
+        inscricao = record_clean[insc_start:insc_end]
         if not inscricao.isdigit():
             self.errors.append("Cabeçalho: inscrição municipal deve ser numérica")
             return False
         
         # Validar datas (deve ser AAAAMMDD)
-        data_inicio = record_clean[12:20]
-        data_fim = record_clean[20:28]
+        data_start = insc_end
+        data_inicio = record_clean[data_start:data_start + DATE_LENGTH]
+        data_fim = record_clean[data_start + DATE_LENGTH:data_start + 2 * DATE_LENGTH]
         
         if not self._validate_date_format(data_inicio):
             self.errors.append(f"Cabeçalho: data de início inválida ({data_inicio})")
@@ -120,44 +139,44 @@ class Validator:
             self.errors.append("Detalhe: tipo do documento deve ser numérico")
             return False
         
-        # Validar número do documento (posições 8-20, deve ser numérico)
-        numero_doc = record_clean[8:20]
+        # Validar número do documento
+        numero_doc = record_clean[8:8 + 12]
         if not numero_doc.isdigit():
             self.errors.append("Detalhe: número do documento deve ser numérico")
             return False
         
-        # Validar data de prestação (posições 20-28, 0-indexed: 20-27)
-        data_prestacao = record_clean[20:28]
+        # Validar data de prestação
+        data_prestacao = record_clean[20:20 + DATE_LENGTH]
         if not self._validate_date_format(data_prestacao):
             self.errors.append(f"Detalhe: data de prestação inválida ({data_prestacao})")
             return False
         
-        # Validar valor dos serviços (posições 30-45, deve ser numérico)
-        valor_servicos = record_clean[30:45]
+        # Validar valor dos serviços
+        valor_servicos = record_clean[DETAIL_VALUE_START:DETAIL_VALUE_END]
         if not valor_servicos.isdigit():
             self.errors.append("Detalhe: valor dos serviços deve ser numérico")
             return False
         
-        # Validar valor das deduções (posições 45-60, deve ser numérico)
-        valor_deducoes = record_clean[45:60]
+        # Validar valor das deduções
+        valor_deducoes = record_clean[DETAIL_DEDUCTION_START:DETAIL_DEDUCTION_END]
         if not valor_deducoes.isdigit():
             self.errors.append("Detalhe: valor das deduções deve ser numérico")
             return False
         
-        # Validar código do serviço (posições 60-65, deve ser numérico)
-        codigo_servico = record_clean[60:65]
+        # Validar código do serviço
+        codigo_servico = record_clean[DETAIL_SERVICE_CODE_START:DETAIL_SERVICE_CODE_END]
         if not codigo_servico.isdigit():
             self.errors.append("Detalhe: código do serviço deve ser numérico")
             return False
         
-        # Validar código do subitem (posições 65-69, deve ser numérico)
-        codigo_subitem = record_clean[65:69]
+        # Validar código do subitem
+        codigo_subitem = record_clean[DETAIL_SUBITEM_START:DETAIL_SUBITEM_END]
         if not codigo_subitem.isdigit():
             self.errors.append("Detalhe: código do subitem deve ser numérico")
             return False
         
-        # Validar alíquota (posições 69-73, deve ser numérico)
-        aliquota = record_clean[69:73]
+        # Validar alíquota
+        aliquota = record_clean[DETAIL_ALIQUOTA_START:DETAIL_ALIQUOTA_END]
         if not aliquota.isdigit():
             self.errors.append("Detalhe: alíquota deve ser numérica")
             return False
@@ -171,9 +190,12 @@ class Validator:
         """
         record_clean = record.rstrip('\r\n')
         
+        # Tamanho esperado: 1 + 7 + 15 + 15 = 38
+        expected_size = 1 + 7 + SERVICE_VALUE_LENGTH + DEDUCTION_VALUE_LENGTH
+        
         # Validar tamanho
-        if len(record_clean) != 38:
-            self.errors.append(f"Rodapé: tamanho incorreto ({len(record_clean)} caracteres, esperado 38)")
+        if len(record_clean) != expected_size:
+            self.errors.append(f"Rodapé: tamanho incorreto ({len(record_clean)} caracteres, esperado {expected_size})")
             return False
         
         # Validar tipo de registro
@@ -234,11 +256,6 @@ class Validator:
                 return False
             
             return True
-        except:
+        except (ValueError, TypeError):
             return False
     
-    def validate_numeric_format(self, value: str) -> bool:
-        """
-        Verifica se valor é numérico válido.
-        """
-        return value.isdigit()

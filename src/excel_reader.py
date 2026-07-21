@@ -1,34 +1,21 @@
 import openpyxl
+import sys
+import os
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 import unicodedata
 from difflib import SequenceMatcher
 
+# Adicionar diretório src ao path para importar constantes
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from layout_generator import HEADER_FUZZY_THRESHOLD, MIN_FUZZY_THRESHOLD, DEFAULT_DATE
+from config import EXPECTED_COLUMNS, HEADER_TOLERANCE
+
 
 class ExcelReader:
     """Classe para ler e extrair tabelas de arquivos Excel."""
     
-    # Lista de colunas esperadas (normalizadas - sem acentos, maiúsculo)
-    EXPECTED_COLUMNS = [
-        "CONTRATO",
-        "CODIGO BACEN",
-        "FORNECEDOR",
-        "INVOICE",
-        "DT EMISSAO",
-        "DESCRICAO SERVICOS CONF. EMAIL ENVIADO",
-        "MOEDA ESTRANGEIRA",
-        "TAXA",
-        "MOEDA",
-        "MOEDA NACIONAL",
-        "CODIGO SERVICO",
-        "CODIGO SERVICOS LEI 116",
-        "% ISS",
-        "ISS",
-        "NFTS",
-        "ENDERECO",
-        "OBSERVACOES",
-        "STATUS"
-    ]
+    EXPECTED_COLUMNS = EXPECTED_COLUMNS
     
     def __init__(self, file_path: str):
         self.file_path = file_path
@@ -96,11 +83,11 @@ class ExcelReader:
             for expected in self.EXPECTED_COLUMNS:
                 # Verificar se algum cabeçalho encontrado faz fuzzy match com o esperado
                 for found in headers_found:
-                    if self.fuzzy_match(expected, found, threshold=0.7):
+                    if self.fuzzy_match(expected, found, threshold=HEADER_FUZZY_THRESHOLD):
                         matches += 1
                         break
             
-            if matches >= len(self.EXPECTED_COLUMNS) - 3:  # Tolerância de 3 diferenças (para CÓDIGO DO SERVIÇO opcional)
+            if matches >= len(self.EXPECTED_COLUMNS) - HEADER_TOLERANCE:  # Tolerância para colunas opcionais
                 return row
                 
         return None
@@ -111,16 +98,13 @@ class ExcelReader:
         Retorna quando a coluna B estiver vazia.
         Usa fuzzy matching para mapear colunas encontradas para nomes esperados.
         """
-        # Primeiro, extrair os cabeçalhos originais e normalizados
-        headers_original = []
+        # Primeiro, extrair os cabeçalhos normalizados
         headers_normalized = []
         for col in range(2, 19):  # Colunas B a R
             cell_value = self.worksheet.cell(row=start_row, column=col).value
             if cell_value:
-                headers_original.append(str(cell_value))
                 headers_normalized.append(self.normalize_header(cell_value))
             else:
-                headers_original.append("")
                 headers_normalized.append("")
         
         # Criar mapeamento usando fuzzy matching
@@ -134,7 +118,7 @@ class ExcelReader:
             best_similarity = 0
             
             for expected in self.EXPECTED_COLUMNS:
-                if self.fuzzy_match(header_norm, expected, threshold=0.6):
+                if self.fuzzy_match(header_norm, expected, threshold=MIN_FUZZY_THRESHOLD):
                     similarity = SequenceMatcher(None, header_norm, expected).ratio()
                     if similarity > best_similarity:
                         best_similarity = similarity
@@ -214,17 +198,26 @@ class ExcelReader:
         Converte data serial do Excel para formato AAAAMMDD.
         """
         if serial_date is None:
-            return ""
+            return DEFAULT_DATE
         
         try:
             if isinstance(serial_date, datetime):
                 return serial_date.strftime("%Y%m%d")
-            else:
+            elif isinstance(serial_date, (int, float)):
                 # Converter serial do Excel para datetime
                 dt = datetime.fromordinal(datetime(1900, 1, 1).toordinal() + int(serial_date) - 2)
                 return dt.strftime("%Y%m%d")
-        except:
-            return ""
+            else:
+                # Tentar converter string
+                data_str = str(serial_date)
+                if ' ' in data_str:
+                    data_str = data_str.split(' ')[0]
+                data_prestacao = data_str.replace('-', '').replace('/', '')
+                if len(data_prestacao) == 8 and data_prestacao.isdigit():
+                    return data_prestacao
+                return DEFAULT_DATE
+        except (ValueError, TypeError, OverflowError):
+            return DEFAULT_DATE
     
     def close(self) -> None:
         """Fecha o arquivo Excel."""

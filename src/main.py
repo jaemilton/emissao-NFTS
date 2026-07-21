@@ -1,15 +1,23 @@
 import sys
 import os
+import argparse
 from datetime import datetime
 from typing import List, Dict, Any
 import tkinter as tk
 from tkinter import filedialog
 
-# Adicionar diretório src ao path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+def _ensure_src_in_path() -> None:
+    """Garante que o diretório src esteja no PYTHONPATH."""
+    src_dir = os.path.dirname(os.path.abspath(__file__))
+    if src_dir not in sys.path:
+        sys.path.insert(0, src_dir)
+
+
+_ensure_src_in_path()
 
 from excel_reader import ExcelReader
-from layout_generator import LayoutGenerator
+from layout_generator import LayoutGenerator, DEFAULT_DATE
 from validator import Validator
 
 
@@ -88,7 +96,75 @@ class NFTSGenerator:
         if dates:
             return min(dates), max(dates)
         else:
-            return "20260511", "20260511"  # Valores padrão
+            return DEFAULT_DATE, DEFAULT_DATE  # Valores padrão
+    
+    def _load_excel(self) -> bool:
+        """Carrega o arquivo Excel."""
+        try:
+            self.log("Carregando arquivo Excel...")
+            self.excel_reader.read_excel_file()
+            self.log("Arquivo Excel carregado com sucesso")
+            return True
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            self.log_error(f"Erro ao carregar arquivo Excel: {str(e)}")
+            return False
+        except Exception as e:
+            self.log_error(f"Erro inesperado ao carregar Excel: {str(e)}")
+            return False
+    
+    def _filter_table_data(self, table_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Filtra registros com coluna NFTS preenchida."""
+        return [row for row in table_data if not row.get("NFTS")]
+    
+    def _process_table(self, idx: int, table_info: Dict[str, Any]) -> bool:
+        """Processa uma única tabela e gera arquivo NFTS."""
+        table_data = table_info['data']
+        header_row = table_info['header_row']
+        
+        filtered_data = self._filter_table_data(table_data)
+        
+        self.log(f"\nProcessando tabela {idx} (linha {header_row})")
+        self.log(f"  Total de registros na tabela: {len(table_data)}")
+        self.log(f"  Registros com NFTS preenchida: {len(table_data) - len(filtered_data)}")
+        self.log(f"  Registros para processar: {len(filtered_data)}")
+        
+        self.tables_processed += 1
+        
+        if not filtered_data:
+            self.log(f"Tabela {idx} não possui registros para inserir (todos têm NFTS preenchida)")
+            return False
+        
+        try:
+            data_inicio, data_fim = self.get_date_range_from_table(filtered_data)
+            filename = f"NFTS_{data_inicio}_{data_fim}.txt"
+            output_path = os.path.join(self.output_dir, filename)
+            
+            self.log(f"Gerando arquivo: {filename}")
+            success, message, total_value = self.layout_generator.generate_file(filtered_data, output_path)
+            
+            if not success:
+                self.log_error(message)
+                return False
+            
+            self.log(message)
+            self.files_generated += 1
+            
+            self.log("Validando arquivo gerado...")
+            is_valid, errors, warnings = self.validator.validate_file_layout(output_path)
+            
+            if is_valid:
+                self.log(f"Arquivo validado com sucesso (Total: {total_value})")
+                self.files_validated += 1
+                return True
+            else:
+                self.log_error(f"Validação falhou: {', '.join(errors)}")
+                for warning in warnings:
+                    self.log(f"Aviso: {warning}")
+                return False
+                
+        except Exception as e:
+            self.log_error(f"Erro ao processar tabela {idx}: {str(e)}")
+            return False
     
     def process(self) -> bool:
         """
@@ -98,12 +174,9 @@ class NFTSGenerator:
         try:
             self.setup_logging()
             
-            # Carregar arquivo Excel
-            self.log("Carregando arquivo Excel...")
-            self.excel_reader.read_excel_file()
-            self.log("Arquivo Excel carregado com sucesso")
+            if not self._load_excel():
+                return False
             
-            # Detectar todas as tabelas
             self.log("Detectando tabelas...")
             tables = self.excel_reader.detect_all_tables()
             self.log(f"Encontradas {len(tables)} tabela(s)")
@@ -112,64 +185,10 @@ class NFTSGenerator:
                 self.log_error("Nenhuma tabela encontrada no arquivo Excel")
                 return False
             
-            # Processar cada tabela
             for idx, table_info in enumerate(tables, 1):
-                table_data = table_info['data']
-                header_row = table_info['header_row']
-                
-                # Filtrar registros com coluna NFTS preenchida
-                filtered_data = [row for row in table_data if not row.get("NFTS")]
-                
-                self.log(f"\nProcessando tabela {idx} (linha {header_row})")
-                self.log(f"  Total de registros na tabela: {len(table_data)}")
-                self.log(f"  Registros com NFTS preenchida: {len(table_data) - len(filtered_data)}")
-                self.log(f"  Registros para processar: {len(filtered_data)}")
-                
-                self.tables_processed += 1
-                
-                # Se não houver registros após filtragem, pular geração
-                if not filtered_data:
-                    self.log(f"Tabela {idx} não possui registros para inserir (todos têm NFTS preenchida)")
-                    continue
-                
-                try:
-                    # Obter range de datas para nome do arquivo
-                    data_inicio, data_fim = self.get_date_range_from_table(filtered_data)
-                    
-                    # Gerar nome do arquivo
-                    filename = f"NFTS_{data_inicio}_{data_fim}.txt"
-                    output_path = os.path.join(self.output_dir, filename)
-                    
-                    # Gerar arquivo NFTS
-                    self.log(f"Gerando arquivo: {filename}")
-                    success, message, total_value = self.layout_generator.generate_file(filtered_data, output_path)
-                    
-                    if success:
-                        self.log(message)
-                        self.files_generated += 1
-                        
-                        # Validar arquivo gerado
-                        self.log("Validando arquivo gerado...")
-                        is_valid, errors, warnings = self.validator.validate_file_layout(output_path)
-                        
-                        if is_valid:
-                            self.log(f"Arquivo validado com sucesso (Total: {total_value})")
-                            self.files_validated += 1
-                        else:
-                            self.log_error(f"Validação falhou: {', '.join(errors)}")
-                            for warning in warnings:
-                                self.log(f"Aviso: {warning}")
-                    else:
-                        self.log_error(message)
-                        
-                except Exception as e:
-                    self.log_error(f"Erro ao processar tabela {idx}: {str(e)}")
-                    continue
+                self._process_table(idx, table_info)
             
-            # Fechar arquivo Excel
             self.excel_reader.close()
-            
-            # Gerar relatório final
             self.generate_final_report()
             
             return len(self.errors) == 0
@@ -222,8 +241,6 @@ def select_excel_file():
 
 def main():
     """Função principal para execução via linha de comando."""
-    import argparse
-    
     parser = argparse.ArgumentParser(description="Gerador de arquivos NFTS a partir de Excel")
     parser.add_argument("excel_file", nargs='?', help="Caminho do arquivo Excel de entrada (opcional - abre diálogo se não fornecido)")
     parser.add_argument("--output", default="output", help="Diretório de saída (default: output)")
