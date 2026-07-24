@@ -79,6 +79,27 @@ class TestFormatServiceCodeTomado(unittest.TestCase):
         self.assertEqual(result, "00000")
 
 
+class TestNormalizeText(unittest.TestCase):
+    def setUp(self):
+        self.generator = MockLayoutGenerator()
+    
+    def test_remove_accents(self):
+        result = self.generator.normalize_text("SERVIÇOS DE PESQUISA E CONSULTORIA")
+        self.assertEqual(result, "SERVICOS DE PESQUISA E CONSULTORIA")
+    
+    def test_remove_newlines(self):
+        result = self.generator.normalize_text("Linha 1\nLinha 2")
+        self.assertEqual(result, "Linha 1 Linha 2")
+    
+    def test_remove_multiple_spaces(self):
+        result = self.generator.normalize_text("Texto    com    espaços")
+        self.assertEqual(result, "Texto com espacos")
+    
+    def test_remove_special_chars(self):
+        result = self.generator.normalize_text("Serviço #1 @ Empresa")
+        self.assertEqual(result, "Servico #1 @ Empresa")
+
+
 class TestFormatDate(unittest.TestCase):
     def setUp(self):
         self.generator = MockLayoutGenerator()

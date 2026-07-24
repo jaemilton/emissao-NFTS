@@ -2,6 +2,7 @@ from typing import Dict, Any, List
 import re
 import os
 import warnings
+import unicodedata
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -102,8 +103,8 @@ class LayoutGenerator:
     
     def normalize_text(self, value: Any) -> str:
         """
-        Normaliza texto removendo quebras de linha e espaços extras.
-        Substitui quebras de linha por espaços.
+        Normaliza texto removendo quebras de linha, espaços extras,
+        acentos e caracteres especiais, mantendo apenas ASCII.
         """
         if value is None:
             return ""
@@ -111,6 +112,8 @@ class LayoutGenerator:
         text = str(value)
         # Substituir quebras de linha por espaços
         text = text.replace('\r\n', ' ').replace('\n', ' ').replace('\r', ' ')
+        # Remover acentos e caracteres especiais, mantendo apenas ASCII
+        text = unicodedata.normalize('NFKD', text).encode('ASCII', 'ignore').decode('ASCII')
         # Remover espaços múltiplos
         text = ' '.join(text.split())
         return text.strip()

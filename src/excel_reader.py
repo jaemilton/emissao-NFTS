@@ -135,8 +135,8 @@ class ExcelReader:
         # Extrair linhas de dados
         for row in range(start_row + 1, self.worksheet.max_row + 1):
             # Verificar se coluna B está vazia (fim da tabela)
-            first_col_value = self.worksheet.cell(row=row, column=2).value
-            if first_col_value is None or str(first_col_value).strip() == "":
+            third_col_value = self.worksheet.cell(row=row, column=4).value
+            if third_col_value is None or str(third_col_value).strip() == "":
                 break
             
             # Extrair valores da linha usando o mapeamento de colunas
